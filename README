@@ -1,0 +1,17 @@
+# This is the open-source stack of software components in the project OpenFabTwin
+The stack is created as a Docker container architecture. 
+
+
+## Components
+The software stack contains of the following docker images:
+- property server datacat (datacat editor, datacat api, datacat restapi, neo4j db)
+- MinIO Object Storage
+- Keycloak + Postgres DB
+- Opensource BIMserver
+- BCFserver
+
+## Run the stack
+1. Create a `.env` file from the example and fill it, except Keycloak client information.
+2. First, Keycloak and Postgres have to be started. In Keycloak, the realms `datacat` and `openfabtwin` need to be created. Also a `bcf-server` and a `datacat-api` client has to be created. The `bcf-server` client also needs a token as secret.
+3. Then the client credentials can be written into the `.env` file.
+4. After that, all other containers can be started.

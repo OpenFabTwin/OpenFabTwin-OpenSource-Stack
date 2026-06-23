@@ -1,0 +1,173 @@
+services:
+
+  db:
+    container_name: datacat-db
+    image: neo4j:5.26.4
+    restart: unless-stopped
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      # - "dbdata:/data"
+      - "./volumes:/data"
+      - "dblogs:/logs"
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    healthcheck:
+      test: perl -MIO::Socket::INET -e 'exit(! defined( IO::Socket::INET->new("localhost:7687")))'
+
+  api:
+    container_name: datacat-api
+    image: schi11er/datacat:${DATACAT_VERSION}
+    restart: unless-stopped
+    environment:
+      - logging.level.de.bentrm=INFO
+      - datacat.client.url=${DATACAT_EDITOR_URL}
+      - datacat.auth.secret=${DATACAT_SECRET}
+      - datacat.auth.issuer=${DATACAT_ISSUER}
+      - datacat.users.admin.password=${DATACAT_ADMIN_PASSWORD}
+      - spring.mail.port=${MAIL_PORT}
+      - spring.mail.host=${MAIL_HOST}
+      - spring.neo4j.authentication.username=neo4j
+      - spring.neo4j.authentication.password=${NEO4J_PASSWORD}
+      - spring.neo4j.uri=bolt://db:7687
+      - management.health.mail.enabled=false
+      - spring.security.oauth2.resourceserver.jwt.issuer-uri=${KEYCLOAK_ISSUER_URI}
+      - spring.security.oauth2.resourceserver.jwt.jwk-set-uri=${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs
+
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    command: [
+        "wait-for-it", "db:7687", "--timeout=300", "--",
+        "wait-for-it", "${MAIL_HOST}:${MAIL_PORT}", "--timeout=30", "--",
+        "java", "--enable-preview", "org.springframework.boot.loader.launch.JarLauncher" ]
+    volumes:
+      - ./logs:/var/log/app
+
+  web:
+    container_name: datacat-web
+    image: schi11er/datacat-editor:${DATACAT_EDITOR_VERSION}
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_USE_SSL=${MINIO_USE_SSL}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - KEYCLOAK_ENABLED=true
+      - KEYCLOAK_URL=${KEYCLOAK_URL}
+      - KEYCLOAK_REALM=${KEYCLOAK_DATACAT_REALM}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_DATACAT_CLIENT_ID}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - ${DATACAT_PORT:-3000}:80
+
+  restapi:
+    container_name: datacat-restapi
+    image: schi11er/datacatrestapi:${DATACAT_REST_API_VERSION}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - ${DATACAT_REST_API_PORT:-3001}:3001
+    environment:
+      - custom.server-url=http://api:8080 # for local development
+      # - custom.server-url=${DATACAT_EDITOR_URL}
+      - custom.username=admin
+      - custom.password=${DATACAT_ADMIN_PASSWORD}
+
+
+  minio:
+    container_name: minio-ids-storage
+    image: minio/minio:latest
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    ports:
+      - ${MINIO_PORT:-9000}:9000
+      - 9001:9001
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+      - MINIO_ADDRESS=:${MINIO_PORT}
+      - MINIO_CONSOLE_ADDRESS=:9001
+    command: minio server /data
+
+  postgres:
+    container_name: keycloak-postgres
+    image: postgres:17.4
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:26.2.2
+    restart: unless-stopped
+    command: start
+    environment:
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8091
+      KC_HOSTNAME_STRICT_BACKCHANNEL: false
+      KC_HTTP_ENABLED: true
+      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_HEALTH_ENABLED: true
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USERNAME}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - 8091:8080
+    depends_on:
+      - postgres
+
+# bimserver
+  bimserver:
+    image: zaqif/bimserver:${BIMSERVER_VERSION}
+    ports:
+      - "8082:8080"
+    volumes:
+      - bimserver_home:/var/bimserver/home
+    environment:
+      - CATALINA_OPTS=-Xmx4G -Xms512m
+    restart: unless-stopped
+
+# bcfserver
+  bcf-app:
+    image: zaqif/bcf-server:${BCFSERVER_VERSION}
+    container_name: bcf-server
+    ports:
+      - "8181:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - AUTH_PROVIDER=keycloak
+      - AUTH_SERVER_URL=${KEYCLOAK_URL}
+      - AUTH_SERVER_INTERNAL_URL=${KEYCLOAK_BCF_INTERNAL_URL}
+      - AUTH_REALM=${KEYCLOAK_BCF_REALM}
+      - AUTH_CLIENT_ID=${KEYCLOAK_BCF_CLIENT_ID}
+      - AUTH_CLIENT_SECRET=${KEYCLOAK_BCF_CLIENT_SECRET}
+      - APP_EXTERNAL_URL=${APP_EXTERNAL_URL}
+    volumes:
+      - ./bcfdb:/application/data
+    restart: unless-stopped
+
+volumes:
+  dbdata:
+  dblogs:
+  postgres_data:
+  bimserver_home:
+
+networks:
+  default:
+    name: openfabtwin-network
