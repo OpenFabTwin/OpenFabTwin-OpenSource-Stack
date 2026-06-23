@@ -14,4 +14,4 @@ The software stack contains of the following docker images:
 1. Create a `.env` file from the example and fill it, except Keycloak client information.
 2. First, Keycloak and Postgres have to be started. In Keycloak, the realms `datacat` and `openfabtwin` need to be created. Also a `bcf-server` and a `datacat-api` client has to be created. The `bcf-server` client also needs a token as secret.
 3. Then the client credentials can be written into the `.env` file.
-4. After that, all other containers can be started.
+4. After that, all other containers can be started.git init
